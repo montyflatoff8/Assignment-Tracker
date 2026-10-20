@@ -1,6 +1,48 @@
 @AssignmentTracker_HostAddress = http://localhost:5204
 
-GET {{AssignmentTracker_HostAddress}}/weatherforecast/
+### GET all assignments
+GET {{AssignmentTracker_HostAddress}}/api/assignments
 Accept: application/json
 
-###
+### GET one assignment
+GET {{AssignmentTracker_HostAddress}}/api/assignments/1
+Accept: application/json
+
+### POST a new assignment
+POST {{AssignmentTracker_HostAddress}}/api/assignments
+Content-Type: application/json
+
+{
+  "title": "Lab 5",
+  "course": "Web Programming 1",
+  "dueDate": "2026-10-30",
+  "status": "todo"
+}
+
+### PUT (update) assignment 1
+PUT {{AssignmentTracker_HostAddress}}/api/assignments/1
+Content-Type: application/json
+
+{
+  "title": "Midterm project",
+  "course": "Web Programming 1",
+  "dueDate": "2026-10-25",
+  "status": "done"
+}
+
+### DELETE assignment 2
+DELETE {{AssignmentTracker_HostAddress}}/api/assignments/2
+
+### POST with invalid data (expect 400)
+POST {{AssignmentTracker_HostAddress}}/api/assignments
+Content-Type: application/json
+
+{
+  "title": "",
+  "course": "Web Programming 1",
+  "status": "someday"
+}
+
+### GET a missing assignment (expect 404)
+GET {{AssignmentTracker_HostAddress}}/api/assignments/999
+Accept: application/json
