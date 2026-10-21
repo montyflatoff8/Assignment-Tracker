@@ -10,6 +10,7 @@ const STATUS_LABELS = { "todo": "To do", "in-progress": "In progress", "done": "
 // Bootstrap badge colors for each status
 const STATUS_CLASSES = { "todo": "text-bg-secondary", "in-progress": "text-bg-warning", "done": "text-bg-success" };
 
+// Shortcut: find an element on the page by its id
 const $ = (id) => document.getElementById(id);
 const els = {
   apiUrl: $("api-url"), reload: $("reload"), retry: $("retry"),
@@ -29,6 +30,7 @@ els.apiUrl.textContent = RESOURCE;
 // parses JSON or problem-details bodies, and writes to the request log.
 // ---------------------------------------------------------------------------
 
+// An error that also carries the HTTP status code and any field validation messages
 class ApiError extends Error {
   constructor(message, { status = 0, title = "", errors = null } = {}) {
     super(message);
@@ -38,6 +40,7 @@ class ApiError extends Error {
   }
 }
 
+// Sends one request to the API and returns the data; throws an ApiError on failure
 async function api(method, url, body) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -105,6 +108,7 @@ async function api(method, url, body) {
 // GET: load and render the list
 // ---------------------------------------------------------------------------
 
+// Shows one list state (loading, error, empty, or list) and hides the rest
 function showState(which) {
   els.loading.hidden = which !== "loading";
   els.error.hidden = which !== "error";
@@ -112,6 +116,7 @@ function showState(which) {
   els.table.hidden = which !== "list";
 }
 
+// GETs all assignments and shows the table, or the error box if it fails
 async function loadAssignments() {
   showState("loading");
   els.count.textContent = "";
@@ -133,6 +138,7 @@ async function loadAssignments() {
   }
 }
 
+// Builds one table row per assignment (or shows the empty message)
 function renderList(assignments) {
   els.rows.replaceChildren();
   els.count.textContent = `(${assignments.length})`;
@@ -159,6 +165,7 @@ function renderList(assignments) {
   showState("list");
 }
 
+// Turns "2026-10-25" into "Oct 25, 2026"
 function formatDate(iso) {
   // "2026-10-25" -> "Oct 25, 2026" (parsed as a local date, not UTC, so it doesn't shift a day)
   const [y, m, d] = String(iso).split("-").map(Number);
@@ -172,6 +179,7 @@ let lastChangedId = null;
 // POST (create) and PUT (update) share the form
 // ---------------------------------------------------------------------------
 
+// Collects the form's values into an object to send to the API
 function readForm() {
   return {
     title: els.title.value,
@@ -181,6 +189,7 @@ function readForm() {
   };
 }
 
+// Removes the red borders and error messages from every field
 function clearFieldErrors() {
   document.querySelectorAll(".invalid-feedback").forEach((el) => (el.textContent = ""));
   document.querySelectorAll(".is-invalid").forEach((el) => {
@@ -189,6 +198,7 @@ function clearFieldErrors() {
   });
 }
 
+// Shows each 400 validation message under its field
 function showFieldErrors(errors) {
   for (const [field, messages] of Object.entries(errors || {})) {
     const key = field.charAt(0).toLowerCase() + field.slice(1);
@@ -204,6 +214,7 @@ function showFieldErrors(errors) {
 
 const MESSAGE_CLASSES = { success: "alert-success", error: "alert-danger", pending: "alert-secondary" };
 
+// Shows the message under the form (success, error, or pending); empty text hides it
 function setFormMessage(text, kind) {
   els.formMessage.textContent = text;
   els.formMessage.classList.remove(...Object.values(MESSAGE_CLASSES));
@@ -211,6 +222,7 @@ function setFormMessage(text, kind) {
   els.formMessage.hidden = !text;
 }
 
+// Switches the form to edit mode, filled in with this assignment
 function startEdit(a) {
   clearFieldErrors();
   setFormMessage("", "");
@@ -225,6 +237,7 @@ function startEdit(a) {
   els.title.focus();
 }
 
+// Switches the form back to create mode and empties it
 function resetForm() {
   els.form.reset();
   els.editId.value = "";
@@ -234,6 +247,7 @@ function resetForm() {
   els.cancelEdit.hidden = true;
 }
 
+// Makes a colored HTTP method badge, e.g. tag("POST", "post")
 function tag(text, cls) {
   const span = document.createElement("span");
   span.className = `badge method-${cls}`;
@@ -241,21 +255,26 @@ function tag(text, cls) {
   return span;
 }
 
+// Create or Save changes: sends a POST (new) or PUT (editing), then reloads the list
 els.form.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearFieldErrors();
+
   const id = els.editId.value;
   const body = readForm();
+
   els.submit.disabled = true;
   setFormMessage(id ? "Saving changes…" : "Creating…", "pending");
   try {
     const saved = id
       ? await api("PUT", `${RESOURCE}/${encodeURIComponent(id)}`, body)
       : await api("POST", RESOURCE, body);
+
     lastChangedId = saved.id;
     resetForm();
     setFormMessage(id ? `Updated assignment #${saved.id} (“${saved.title}”).`
                       : `Created assignment #${saved.id} (“${saved.title}”).`, "success");
+
     await loadAssignments();   // re-GET so the list reflects what the API actually stored
   }
 
@@ -269,12 +288,14 @@ els.form.addEventListener("submit", async (e) => {
   }
 });
 
+// Cancel edit: back to create mode
 els.cancelEdit.addEventListener("click", () => { resetForm(); setFormMessage("", ""); });
 
 // ---------------------------------------------------------------------------
 // DELETE: two-step confirm on the button itself (no browser pop-up)
 // ---------------------------------------------------------------------------
 
+// First click arms the button; second click sends the DELETE and reloads the list
 async function deleteAssignment(a, button) {
   if (button.dataset.confirm !== "yes") {
     button.dataset.confirm = "yes";
@@ -309,6 +330,7 @@ async function deleteAssignment(a, button) {
 // Request log
 // ---------------------------------------------------------------------------
 
+// Adds a request to the log before it is sent (method, route, request body)
 function addLogEntry(method, url, body) {
   const li = document.createElement("li");
   li.className = "list-group-item";
@@ -331,6 +353,7 @@ function addLogEntry(method, url, body) {
   return li;
 }
 
+// Fills in a log entry once the response arrives (status, time, response body)
 function finishLogEntry(li, { status, ok, ms, text }) {
   const statusEl = li.querySelector(".log-status");
   statusEl.textContent = `${status} · ${Math.round(ms)} ms`;
@@ -341,6 +364,7 @@ function finishLogEntry(li, { status, ok, ms, text }) {
   li.append(logBlock("Response", text));
 }
 
+// Makes a collapsible "Request body" / "Response" section for a log entry
 function logBlock(label, text) {
   const details = document.createElement("details");
   details.className = "mt-2";
@@ -355,8 +379,10 @@ function logBlock(label, text) {
   return details;
 }
 
+// Wire up the Clear, Reload, and Try again buttons
 els.clearLog.addEventListener("click", () => els.log.replaceChildren());
 els.reload.addEventListener("click", loadAssignments);
 els.retry.addEventListener("click", loadAssignments);
 
+// Load the list when the page first opens
 loadAssignments();
