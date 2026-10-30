@@ -1,0 +1,13 @@
+﻿{
+    "Timestamp":  "2026-10-30T03:41:14.117Z ",
+    "EventId":  0,
+    "LogLevel":  "Warning",
+    "Category":  "AssignmentTracker.Services.AssignmentRepository",
+    "Message":  "Slow query detected on POST /api/assignments: execution took 153ms (threshold 150ms)",
+    "State":  {
+                  "Endpoint":  "POST /api/assignments",
+                  "ElapsedMs":  153,
+                  "ThresholdMs":  150,
+                  "{OriginalFormat}":  "Slow query detected on {Endpoint}: execution took {ElapsedMs}ms (threshold {ThresholdMs}ms)"
+              }
+}

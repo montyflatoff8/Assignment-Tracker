@@ -1,0 +1,13 @@
+﻿{
+    "Timestamp":  "2026-10-30T03:41:14.117Z ",
+    "EventId":  0,
+    "LogLevel":  "Information",
+    "Category":  "AssignmentTracker.Services.AssignmentRepository",
+    "Message":  "Successfully created assignment Outage test with generated ID 7 in 154ms",
+    "State":  {
+                  "AssignmentTitle":  "Outage test",
+                  "AssignmentId":  7,
+                  "ElapsedMs":  154,
+                  "{OriginalFormat}":  "Successfully created assignment {AssignmentTitle} with generated ID {AssignmentId} in {ElapsedMs}ms"
+              }
+}
