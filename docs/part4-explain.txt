@@ -1,0 +1,8 @@
+﻿                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using idx_assignments_status on assignments  (cost=0.14..8.16 rows=1 width=430) (actual time=0.021..0.026 rows=5 loops=1)
+   Index Cond: ((status)::text = 'todo'::text)
+ Planning Time: 0.643 ms
+ Execution Time: 0.068 ms
+(4 rows)
+

@@ -1,0 +1,15 @@
+﻿                                 Table "public.assignments"
+   Column   |           Type           | Collation | Nullable |           Default            
+------------+--------------------------+-----------+----------+------------------------------
+ id         | integer                  |           | not null | generated always as identity
+ title      | character varying(100)   |           | not null | 
+ course     | character varying(60)    |           | not null | 
+ due_date   | date                     |           | not null | 
+ status     | character varying(20)    |           | not null | 'todo'::character varying
+ created_at | timestamp with time zone |           | not null | now()
+Indexes:
+    "assignments_pkey" PRIMARY KEY, btree (id)
+    "idx_assignments_status" btree (status)
+Check constraints:
+    "assignments_status_check" CHECK (status::text = ANY (ARRAY['todo'::character varying, 'in-progress'::character varying, 'done'::character varying]::text[]))
+

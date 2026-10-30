@@ -112,19 +112,46 @@ Transfer-Encoding: chunked
 
 ## Part 4: Query performance baseline
 
+Index confirmed (`\d assignments`):
+
+```text
+                                 Table "public.assignments"
+   Column   |           Type           | Collation | Nullable |           Default            
+------------+--------------------------+-----------+----------+------------------------------
+ id         | integer                  |           | not null | generated always as identity
+ title      | character varying(100)   |           | not null | 
+ course     | character varying(60)    |           | not null | 
+ due_date   | date                     |           | not null | 
+ status     | character varying(20)    |           | not null | 'todo'::character varying
+ created_at | timestamp with time zone |           | not null | now()
+Indexes:
+    "assignments_pkey" PRIMARY KEY, btree (id)
+    "idx_assignments_status" btree (status)
+Check constraints:
+    "assignments_status_check" CHECK (status::text = ANY (ARRAY['todo'::character varying, 'in-progress'::character varying, 'done'::character varying]::text[]))
+```
+
 ```sql
 EXPLAIN ANALYZE SELECT * FROM assignments WHERE status = 'todo';
 ```
 
 ```text
-PASTE: EXPLAIN ANALYZE output
+                                                              QUERY PLAN                                                              
+--------------------------------------------------------------------------------------------------------------------------------------
+ Index Scan using idx_assignments_status on assignments  (cost=0.14..8.16 rows=1 width=430) (actual time=0.021..0.026 rows=5 loops=1)
+   Index Cond: ((status)::text = 'todo'::text)
+ Planning Time: 0.643 ms
+ Execution Time: 0.068 ms
+(4 rows)
 ```
 
 | Measure | Value |
 |---|---|
-| Scan type | |
-| Planning time | |
-| Execution time | |
+| Scan type | Index Scan using idx_assignments_status |
+| Planning time | 0.643 ms |
+| Execution time | 0.068 ms |
+
+**Observation:** On this small table (under 10 rows) PostgreSQL chose an Index Scan rather than the Seq Scan the assignment predicts. The table has never been analyzed, so the planner has no row statistics yet and estimated only `rows=1` match (the actual was 5). For a single expected row, an index lookup looks cheapest. Once `ANALYZE` (or autovacuum) gathers real statistics, the planner may switch to a Seq Scan, because the whole table fits on one 8KB page. Either way the query completes in well under 1 ms; this is the baseline.
 
 ---
 
