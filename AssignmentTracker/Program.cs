@@ -4,6 +4,19 @@ using Npgsql;
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
+// Logging: one JSON object per line on stdout, so Docker, Azure Container Apps and
+// Log Analytics can index each named property (DbHost, ElapsedMs, SqlState...).
+// Minimum levels per category are set in appsettings*.json ("Logging:LogLevel").
+// ---------------------------------------------------------------------------
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(options =>
+{
+    options.UseUtcTimestamp = true;
+    options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ ";
+    options.IncludeScopes = false;
+});
+
+// ---------------------------------------------------------------------------
 // Services (dependency injection)
 // ---------------------------------------------------------------------------
 

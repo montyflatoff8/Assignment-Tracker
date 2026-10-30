@@ -1,6 +1,7 @@
 using AssignmentTracker.Models;
 using AssignmentTracker.Services;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 namespace AssignmentTracker.Controllers;
 
@@ -9,9 +10,13 @@ namespace AssignmentTracker.Controllers;
 ///
 /// [ApiController] turns on API-friendly behavior: request bodies are read from JSON
 /// automatically, and malformed JSON gets an automatic 400 Bad Request.
+///
+/// [DatabaseUnavailable] turns database failures (already logged by the repository) into a
+/// clean 503 problem response, so no stack trace or connection detail reaches the client.
 /// </summary>
 [ApiController]
 [Route("api/assignments")]
+[DatabaseUnavailable]
 public class AssignmentsController : ControllerBase
 {
     private readonly AssignmentRepository _repository;
@@ -117,5 +122,27 @@ public class AssignmentsController : ControllerBase
             statusCode: StatusCodes.Status404NotFound,
             title: "Assignment not found",
             detail: $"No assignment exists with id {id}.");
+    }
+}
+
+
+/// <summary>
+/// Exception filter: when a database call throws NpgsqlException, return
+/// 503 Service Unavailable with a generic problem-details body instead of a 500.
+/// </summary>
+public class DatabaseUnavailableAttribute : Microsoft.AspNetCore.Mvc.Filters.ExceptionFilterAttribute
+{
+    public override void OnException(Microsoft.AspNetCore.Mvc.Filters.ExceptionContext context)
+    {
+        if (context.Exception is not NpgsqlException) return;
+
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status503ServiceUnavailable,
+            Title = "Database Service Unavailable",
+            Detail = "A persistence error occurred while processing the request."
+        };
+        context.Result = new ObjectResult(problem) { StatusCode = problem.Status };
+        context.ExceptionHandled = true;
     }
 }
