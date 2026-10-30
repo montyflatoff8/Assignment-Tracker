@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace AssignmentTracker.Controllers;
 
 /// <summary>
-/// CRUD endpoints for the "assignments" resource.
+/// CRUD endpoints for the "assignments" resource, stored in PostgreSQL.
 ///
 /// [ApiController] turns on API-friendly behavior: request bodies are read from JSON
 /// automatically, and malformed JSON gets an automatic 400 Bad Request.
@@ -14,28 +14,28 @@ namespace AssignmentTracker.Controllers;
 [Route("api/assignments")]
 public class AssignmentsController : ControllerBase
 {
-    private readonly AssignmentStore _store;
+    private readonly AssignmentRepository _repository;
 
-    // The store is a singleton registered in Program.cs; ASP.NET passes it in here (dependency injection).
-    public AssignmentsController(AssignmentStore store)
+    // The repository is registered in Program.cs; ASP.NET passes it in here (dependency injection).
+    public AssignmentsController(AssignmentRepository repository)
     {
-        _store = store;
+        _repository = repository;
     }
 
 
     // GET /api/assignments  -> 200 with every assignment (an empty array when there are none)
     [HttpGet]
-    public ActionResult<List<Assignment>> GetAll()
+    public async Task<ActionResult<List<Assignment>>> GetAll(CancellationToken ct)
     {
-        return Ok(_store.GetAll());
+        return Ok(await _repository.GetAllAsync(ct));
     }
 
 
     // GET /api/assignments/{id}  -> 200 with one assignment, or 404
     [HttpGet("{id:int}")]
-    public ActionResult<Assignment> GetById(int id)
+    public async Task<ActionResult<Assignment>> GetById(int id, CancellationToken ct)
     {
-        var assignment = _store.GetById(id);
+        var assignment = await _repository.GetByIdAsync(id, ct);
 
         if (assignment is null)
         {
@@ -48,14 +48,14 @@ public class AssignmentsController : ControllerBase
 
     // POST /api/assignments  -> 201 Created with the new assignment and a Location header, or 400
     [HttpPost]
-    public ActionResult<Assignment> Create(AssignmentInput input)
+    public async Task<ActionResult<Assignment>> Create(AssignmentInput input, CancellationToken ct)
     {
         if (!IsValid(input))
         {
             return ValidationProblem(ModelState);
         }
 
-        var created = _store.Add(input);
+        var created = await _repository.AddAsync(input, ct);
 
         // Sets the Location header to /api/assignments/{id} of the new assignment
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
@@ -64,14 +64,14 @@ public class AssignmentsController : ControllerBase
 
     // PUT /api/assignments/{id}  -> 200 with the updated assignment, 400, or 404
     [HttpPut("{id:int}")]
-    public ActionResult<Assignment> Update(int id, AssignmentInput input)
+    public async Task<ActionResult<Assignment>> Update(int id, AssignmentInput input, CancellationToken ct)
     {
         if (!IsValid(input))
         {
             return ValidationProblem(ModelState);
         }
 
-        var updated = _store.Update(id, input);
+        var updated = await _repository.UpdateAsync(id, input, ct);
 
         if (updated is null)
         {
@@ -84,9 +84,9 @@ public class AssignmentsController : ControllerBase
 
     // DELETE /api/assignments/{id}  -> 204 No Content, or 404
     [HttpDelete("{id:int}")]
-    public IActionResult Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        if (!_store.Delete(id))
+        if (!await _repository.DeleteAsync(id, ct))
         {
             return AssignmentNotFound(id);
         }
@@ -95,7 +95,7 @@ public class AssignmentsController : ControllerBase
     }
 
 
-    // Runs our validation rules and copies any errors into ModelState,
+    // Runs validation rules and copies any errors into ModelState,
     // so ValidationProblem(ModelState) returns them as a standard 400 response.
     private bool IsValid(AssignmentInput input)
     {

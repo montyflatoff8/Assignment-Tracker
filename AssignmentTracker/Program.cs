@@ -1,4 +1,5 @@
 using AssignmentTracker.Services;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,7 +13,29 @@ builder.Services.AddControllers();   // endpoints live in Controllers/Assignment
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 
-builder.Services.AddSingleton<AssignmentStore>();
+// ---------------------------------------------------------------------------
+// PostgreSQL
+// Settings come from the "Database" section (appsettings*.json) and can be overridden by
+// environment variables such as Database__Host=db (that's how compose.yaml configures it).
+// ---------------------------------------------------------------------------
+var db = builder.Configuration.GetSection("Database");
+var connectionString = new NpgsqlConnectionStringBuilder
+{
+    Host = db["Host"] ?? "localhost",
+    Port = db.GetValue("Port", 5432),
+    Database = db["Name"] ?? "student_db",
+    Username = db["Username"],
+    Password = db["Password"],
+    SslMode = db.GetValue("SslMode", SslMode.Prefer)
+}.ConnectionString;
+
+// One NpgsqlDataSource for the whole app = one shared connection pool.
+builder.Services.AddSingleton(serviceProvider =>
+    new NpgsqlDataSourceBuilder(connectionString)
+        .UseLoggerFactory(serviceProvider.GetRequiredService<ILoggerFactory>())
+        .Build());
+
+builder.Services.AddScoped<AssignmentRepository>();
 
 // The consumer app runs on a different port (a different "origin"), so the browser
 // will only let it call this API if we explicitly allow that origin with CORS.

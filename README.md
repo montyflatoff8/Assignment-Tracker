@@ -73,15 +73,32 @@ Errors are returned as standard [problem details](https://www.rfc-editor.org/rfc
 - **Safe rendering:** everything that comes from the API is inserted with `textContent`, never `innerHTML`, so a title like `<b>Lab 5</b>` is displayed as literal text, not HTML.
 - **Request log:** every call shows its method, route, status code, time, request body and response body.
 
+## Running with Docker (API + PostgreSQL)
+
+Data is stored in PostgreSQL 17. `compose.yaml` starts the API and the database together on a private bridge network; the API waits until the database passes its healthcheck.
+
+```bash
+docker compose up -d --build        # API on http://localhost:8080, Postgres on localhost:5432
+curl http://localhost:8080/api/assignments
+docker compose down                 # removes the containers; data stays in the pgdata volume
+```
+
+Database rows live in the `pgdata` named volume, so they survive `docker compose down` / `up`. Only `docker compose down -v` deletes them. `init-schema.sql` runs only when the volume is empty (the first start).
+
+To run the API from Visual Studio instead, start just the database (`docker compose up -d db`); `appsettings.Development.json` points the API at `localhost:5432`. When the API runs in Docker, set `ApiBaseUrl` in `AssignmentTracker.Client/appsettings.json` to `http://localhost:8080`.
+
 ## Project layout
 
 ```
 AssignmentTracker/                 API
   Models/Assignment.cs             Assignment model + AssignmentInput (request body + validation)
   Controllers/AssignmentsController.cs  GET/POST/PUT/DELETE endpoints
-  Services/AssignmentStore.cs      Thread-safe in-memory store
+  Services/AssignmentRepository.cs PostgreSQL data access (Npgsql, parameterized SQL)
   Program.cs                       Services (DI), CORS, and the request pipeline
   AssignmentTracker.http           Sample requests
+Dockerfile                         Multi-stage build for the API image
+compose.yaml                       API + PostgreSQL 17 with a persistent named volume
+init-schema.sql                    Table, index and seed rows (runs on first database start)
 AssignmentTracker.Client/          Consumer web app
   Program.cs                       Serves wwwroot and /config.js (the API address)
   wwwroot/index.html, app.js, styles.css
