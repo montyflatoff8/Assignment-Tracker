@@ -123,13 +123,18 @@ jobs:
                 maxReplicas: 1
           YAML
 
-          if az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" > /dev/null 2>&1; then
-            echo "Updating existing Container App"
-            az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none
-          else
-            echo "Creating Container App"
-            az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none
-          fi
+          # Up to 3 attempts: Azure API calls occasionally drop with "connection reset".
+          for attempt in 1 2 3; do
+            if az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" > /dev/null 2>&1; then
+              echo "Updating existing Container App (attempt $attempt)"
+              az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none && break
+            else
+              echo "Creating Container App (attempt $attempt)"
+              az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none && break
+            fi
+            if [ "$attempt" = 3 ]; then echo "Deployment failed after 3 attempts"; exit 1; fi
+            echo "Retrying in 20 seconds..."; sleep 20
+          done
 
           FQDN=$(az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
           echo "Deployed: https://$FQDN/api/assignments" >> "$GITHUB_STEP_SUMMARY"
