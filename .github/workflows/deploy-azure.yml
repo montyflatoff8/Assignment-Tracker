@@ -1,0 +1,108 @@
+# Builds the API image, pushes it to the class container registry, and deploys it to
+# Azure Container Apps.
+#
+# Sign-in uses GitHub OIDC (no passwords or secrets): Azure trusts the identity
+# id-wp1-f26-s04 only for workflows running from montyflatoff8/wp1-fall26-azure on main,
+# so this job is skipped in any other repo (such as Assignment-Tracker).
+#
+# The running app uses a different identity, id-wp1-f26-s04-runtime, to pull its image
+# and to get Microsoft Entra tokens for PostgreSQL (Database__UseManagedIdentity=true).
+#
+# Database connection: set these repository variables on GitHub
+# (Settings > Secrets and variables > Actions > Variables), then re-run this workflow:
+#   DB_HOST   e.g. <server>.postgres.database.azure.com
+#   DB_NAME   your database name
+#   DB_USER   the PostgreSQL role mapped to id-wp1-f26-s04-runtime
+# Until they are set, the app deploys and runs but database calls return 503.
+
+name: Deploy API to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # lets the job request an OIDC token for azure/login
+  contents: read
+
+env:
+  AZURE_TENANT_ID: 2db2e86b-779f-46ba-919a-e062bddec8f6
+  AZURE_SUBSCRIPTION_ID: 53e48d05-17eb-429a-8c7e-62fc0bff29f2
+  DEPLOY_CLIENT_ID: 8a75be5f-38c2-4899-b528-0c57480f1261     # id-wp1-f26-s04
+  RESOURCE_GROUP: rg-wp1-f26-s04
+  ACR_NAME: acrwp1f26c6f36039
+  ACR_LOGIN_SERVER: acrwp1f26c6f36039.azurecr.io
+  IMAGE_REPOSITORY: s04/assignment-tracker-api
+  CONTAINERAPP_ENV: cae-wp1-f26-s04-eus2
+  CONTAINERAPP_NAME: ca-wp1-f26-s04-api
+  RUNTIME_IDENTITY: id-wp1-f26-s04-runtime
+
+jobs:
+  deploy:
+    if: github.repository == 'montyflatoff8/wp1-fall26-azure'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: |
+          IMAGE="$ACR_LOGIN_SERVER/$IMAGE_REPOSITORY:${GITHUB_SHA::7}"
+          az acr login --name "$ACR_NAME"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Create or update the Container App
+        env:
+          DB_HOST: ${{ vars.DB_HOST || 'db-not-configured.invalid' }}
+          DB_NAME: ${{ vars.DB_NAME || 'not_configured' }}
+          DB_USER: ${{ vars.DB_USER || 'not_configured' }}
+        run: |
+          az extension add --name containerapp --upgrade --only-show-errors
+
+          RUNTIME_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query id -o tsv)
+          RUNTIME_CLIENT_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query clientId -o tsv)
+
+          APP_SETTINGS=(
+            "ASPNETCORE_ENVIRONMENT=Production"
+            "Database__Host=$DB_HOST"
+            "Database__Port=5432"
+            "Database__Name=$DB_NAME"
+            "Database__Username=$DB_USER"
+            "Database__UseManagedIdentity=true"
+            "Database__ManagedIdentityClientId=$RUNTIME_CLIENT_ID"
+          )
+
+          if az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" > /dev/null 2>&1; then
+            echo "Updating existing Container App"
+            az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" \
+              --image "$IMAGE" \
+              --set-env-vars "${APP_SETTINGS[@]}" \
+              --only-show-errors -o none
+          else
+            echo "Creating Container App"
+            az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" \
+              --environment "$CONTAINERAPP_ENV" \
+              --image "$IMAGE" \
+              --user-assigned "$RUNTIME_ID" \
+              --registry-server "$ACR_LOGIN_SERVER" \
+              --registry-identity "$RUNTIME_ID" \
+              --ingress external --target-port 8080 \
+              --min-replicas 0 --max-replicas 1 \
+              --env-vars "${APP_SETTINGS[@]}" \
+              --only-show-errors -o none
+          fi
+
+          FQDN=$(az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Deployed: https://$FQDN/api/assignments" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployed: https://$FQDN/api/assignments"
