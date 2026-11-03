@@ -35,7 +35,7 @@ env:
   ACR_LOGIN_SERVER: acrwp1f26c6f36039.azurecr.io
   IMAGE_REPOSITORY: wp1/s04/assignment-tracker-api
   CONTAINERAPP_ENV: cae-wp1-f26-s04-eus2
-  CONTAINERAPP_NAME: ca-wp1-f26-s04-api
+  CONTAINERAPP_NAME: wp1-s04-api              # the class policy only allows wp1-s04-api / wp1-s04-frontend
   RUNTIME_IDENTITY: id-wp1-f26-s04-runtime
 
 jobs:
@@ -72,35 +72,63 @@ jobs:
 
           RUNTIME_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query id -o tsv)
           RUNTIME_CLIENT_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query clientId -o tsv)
+          ENV_ID=$(az containerapp env show -n "$CONTAINERAPP_ENV" -g "$RESOURCE_GROUP" --query id -o tsv)
 
-          APP_SETTINGS=(
-            "ASPNETCORE_ENVIRONMENT=Production"
-            "Database__Host=$DB_HOST"
-            "Database__Port=5432"
-            "Database__Name=$DB_NAME"
-            "Database__Username=$DB_USER"
-            "Database__UseManagedIdentity=true"
-            "Database__ManagedIdentityClientId=$RUNTIME_CLIENT_ID"
-          )
+          # The full app definition is written out as YAML so every setting the class policy
+          # (wp1-f26-s04-apps) checks is set explicitly: name, eastus2, Single revision mode,
+          # one container, 0.5 CPU / 1Gi memory, min 0 / max 1 replicas.
+          # The registry is pulled with the runtime identity, which already has
+          # Repository Reader on the registry (so the CLI is not asked to create role assignments).
+          cat > containerapp.yaml <<YAML
+          location: eastus2
+          identity:
+            type: UserAssigned
+            userAssignedIdentities:
+              ${RUNTIME_ID}: {}
+          properties:
+            environmentId: ${ENV_ID}
+            configuration:
+              activeRevisionsMode: Single
+              ingress:
+                external: true
+                targetPort: 8080
+                transport: auto
+              registries:
+                - server: ${ACR_LOGIN_SERVER}
+                  identity: ${RUNTIME_ID}
+            template:
+              containers:
+                - name: api
+                  image: ${IMAGE}
+                  resources:
+                    cpu: 0.5
+                    memory: 1Gi
+                  env:
+                    - name: ASPNETCORE_ENVIRONMENT
+                      value: Production
+                    - name: Database__Host
+                      value: "${DB_HOST}"
+                    - name: Database__Port
+                      value: "5432"
+                    - name: Database__Name
+                      value: "${DB_NAME}"
+                    - name: Database__Username
+                      value: "${DB_USER}"
+                    - name: Database__UseManagedIdentity
+                      value: "true"
+                    - name: Database__ManagedIdentityClientId
+                      value: "${RUNTIME_CLIENT_ID}"
+              scale:
+                minReplicas: 0
+                maxReplicas: 1
+          YAML
 
           if az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" > /dev/null 2>&1; then
             echo "Updating existing Container App"
-            az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" \
-              --image "$IMAGE" \
-              --set-env-vars "${APP_SETTINGS[@]}" \
-              --only-show-errors -o none
+            az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none
           else
             echo "Creating Container App"
-            az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" \
-              --environment "$CONTAINERAPP_ENV" \
-              --image "$IMAGE" \
-              --user-assigned "$RUNTIME_ID" \
-              --registry-server "$ACR_LOGIN_SERVER" \
-              --registry-identity "$RUNTIME_ID" \
-              --ingress external --target-port 8080 \
-              --min-replicas 0 --max-replicas 1 \
-              --env-vars "${APP_SETTINGS[@]}" \
-              --only-show-errors -o none
+            az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none
           fi
 
           FQDN=$(az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
