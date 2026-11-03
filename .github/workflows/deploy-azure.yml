@@ -68,74 +68,72 @@ jobs:
           DB_NAME: ${{ vars.DB_NAME || 'not_configured' }}
           DB_USER: ${{ vars.DB_USER || 'not_configured' }}
         run: |
-          az extension add --name containerapp --upgrade --only-show-errors
+          RG_ID="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP"
+          APP_ID="$RG_ID/providers/Microsoft.App/containerApps/$CONTAINERAPP_NAME"
+          ENV_ID="$RG_ID/providers/Microsoft.App/managedEnvironments/$CONTAINERAPP_ENV"
+          RUNTIME_ID="$RG_ID/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$RUNTIME_IDENTITY"
+          RUNTIME_CLIENT_ID=$(az identity show --ids "$RUNTIME_ID" --query clientId -o tsv)
+          API="https://management.azure.com$APP_ID?api-version=2024-03-01"
 
-          RUNTIME_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query id -o tsv)
-          RUNTIME_CLIENT_ID=$(az identity show -n "$RUNTIME_IDENTITY" -g "$RESOURCE_GROUP" --query clientId -o tsv)
-          ENV_ID=$(az containerapp env show -n "$CONTAINERAPP_ENV" -g "$RESOURCE_GROUP" --query id -o tsv)
-
-          # The full app definition is written out as YAML so every setting the class policy
-          # (wp1-f26-s04-apps) checks is set explicitly: name, eastus2, Single revision mode,
+          # The full Container App definition, sent straight to the Azure Resource Manager API
+          # (a PUT creates the app or updates it). Every setting the class policy
+          # (wp1-f26-s04-apps) checks is explicit: name, eastus2, Single revision mode,
           # one container, 0.5 CPU / 1Gi memory, min 0 / max 1 replicas.
-          # The registry is pulled with the runtime identity, which already has
-          # Repository Reader on the registry (so the CLI is not asked to create role assignments).
-          cat > containerapp.yaml <<YAML
-          location: eastus2
-          identity:
-            type: UserAssigned
-            userAssignedIdentities:
-              ${RUNTIME_ID}: {}
-          properties:
-            environmentId: ${ENV_ID}
-            configuration:
-              activeRevisionsMode: Single
-              ingress:
-                external: true
-                targetPort: 8080
-                transport: auto
-              registries:
-                - server: ${ACR_LOGIN_SERVER}
-                  identity: ${RUNTIME_ID}
-            template:
-              containers:
-                - name: api
-                  image: ${IMAGE}
-                  resources:
-                    cpu: 0.5
-                    memory: 1Gi
-                  env:
-                    - name: ASPNETCORE_ENVIRONMENT
-                      value: Production
-                    - name: Database__Host
-                      value: "${DB_HOST}"
-                    - name: Database__Port
-                      value: "5432"
-                    - name: Database__Name
-                      value: "${DB_NAME}"
-                    - name: Database__Username
-                      value: "${DB_USER}"
-                    - name: Database__UseManagedIdentity
-                      value: "true"
-                    - name: Database__ManagedIdentityClientId
-                      value: "${RUNTIME_CLIENT_ID}"
-              scale:
-                minReplicas: 0
-                maxReplicas: 1
-          YAML
+          # The image is pulled with the runtime identity, which already has
+          # Repository Reader on the registry.
+          jq -n \
+            --arg env "$ENV_ID" --arg rid "$RUNTIME_ID" --arg acr "$ACR_LOGIN_SERVER" --arg image "$IMAGE" \
+            --arg dbHost "$DB_HOST" --arg dbName "$DB_NAME" --arg dbUser "$DB_USER" --arg miClient "$RUNTIME_CLIENT_ID" \
+            '{
+              location: "eastus2",
+              identity: { type: "UserAssigned", userAssignedIdentities: { ($rid): {} } },
+              properties: {
+                environmentId: $env,
+                configuration: {
+                  activeRevisionsMode: "Single",
+                  ingress: { external: true, targetPort: 8080, transport: "auto" },
+                  registries: [ { server: $acr, identity: $rid } ]
+                },
+                template: {
+                  containers: [ {
+                    name: "api",
+                    image: $image,
+                    resources: { cpu: 0.5, memory: "1Gi" },
+                    env: [
+                      { name: "ASPNETCORE_ENVIRONMENT",            value: "Production" },
+                      { name: "Database__Host",                    value: $dbHost },
+                      { name: "Database__Port",                    value: "5432" },
+                      { name: "Database__Name",                    value: $dbName },
+                      { name: "Database__Username",                value: $dbUser },
+                      { name: "Database__UseManagedIdentity",      value: "true" },
+                      { name: "Database__ManagedIdentityClientId", value: $miClient }
+                    ]
+                  } ],
+                  scale: { minReplicas: 0, maxReplicas: 1 }
+                }
+              }
+            }' > containerapp.json
 
           # Up to 3 attempts: Azure API calls occasionally drop with "connection reset".
           for attempt in 1 2 3; do
-            if az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" > /dev/null 2>&1; then
-              echo "Updating existing Container App (attempt $attempt)"
-              az containerapp update -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none && break
-            else
-              echo "Creating Container App (attempt $attempt)"
-              az containerapp create -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --yaml containerapp.yaml --only-show-errors -o none && break
-            fi
+            echo "Deploying $CONTAINERAPP_NAME (attempt $attempt)"
+            az rest --method put --url "$API" --body @containerapp.json -o none && break
             if [ "$attempt" = 3 ]; then echo "Deployment failed after 3 attempts"; exit 1; fi
             echo "Retrying in 20 seconds..."; sleep 20
           done
 
-          FQDN=$(az containerapp show -n "$CONTAINERAPP_NAME" -g "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          # Wait for Azure to finish provisioning (up to ~5 minutes)
+          for i in $(seq 1 30); do
+            STATE=$(az rest --method get --url "$API" --query properties.provisioningState -o tsv 2>/dev/null || echo "Unknown")
+            echo "Provisioning state: $STATE"
+            [ "$STATE" = "Succeeded" ] && break
+            if [ "$STATE" = "Failed" ]; then
+              az rest --method get --url "$API" --query properties -o json
+              exit 1
+            fi
+            sleep 10
+          done
+
+          FQDN=$(az rest --method get --url "$API" --query properties.configuration.ingress.fqdn -o tsv)
           echo "Deployed: https://$FQDN/api/assignments" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployed: https://$FQDN/api/assignments"
