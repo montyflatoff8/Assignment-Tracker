@@ -33,7 +33,7 @@ env:
   RESOURCE_GROUP: rg-wp1-f26-s04
   ACR_NAME: acrwp1f26c6f36039
   ACR_LOGIN_SERVER: acrwp1f26c6f36039.azurecr.io
-  IMAGE_REPOSITORY: s04/assignment-tracker-api
+  IMAGE_REPOSITORY: wp1/s04/assignment-tracker-api
   CONTAINERAPP_ENV: cae-wp1-f26-s04-eus2
   CONTAINERAPP_NAME: ca-wp1-f26-s04-api
   RUNTIME_IDENTITY: id-wp1-f26-s04-runtime
